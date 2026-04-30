@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 
 #include <onmt/BPE.h>
+#include <onmt/CubeTag.h>
 #include <onmt/SentencePiece.h>
 #include <onmt/Tokenizer.h>
 
@@ -1130,4 +1131,136 @@ int main(int argc, char *argv[]) {
   assert(argc == 2);
   data_dir = argv[1];
   return RUN_ALL_TESTS();
+}
+
+// ---------------------------------------------------------------------------
+// CubeTag tests
+// ---------------------------------------------------------------------------
+
+TEST(CubeTagTest, IsCubeTag) {
+  EXPECT_TRUE(CubeTagParser::is_cube_tag("｟cube｠"));
+  EXPECT_TRUE(CubeTagParser::is_cube_tag("｟cube:contact=alice｠"));
+  EXPECT_TRUE(CubeTagParser::is_cube_tag("｟cube:contact=alice;path=/ai/route;regex=player.*｠"));
+  EXPECT_FALSE(CubeTagParser::is_cube_tag("｟mrk_case_modifier_C｠"));
+  EXPECT_FALSE(CubeTagParser::is_cube_tag("｟notcube:contact=x｠"));
+  EXPECT_FALSE(CubeTagParser::is_cube_tag("plain text"));
+  EXPECT_FALSE(CubeTagParser::is_cube_tag(""));
+}
+
+TEST(CubeTagTest, ParseAllFields) {
+  const std::string placeholder = "｟cube:contact=alice@ai.net;path=/players/route1;regex=player[0-9]+｠";
+  CubeTag tag = CubeTagParser::parse(placeholder);
+  EXPECT_TRUE(tag.valid());
+  EXPECT_EQ(tag.contact, "alice@ai.net");
+  EXPECT_EQ(tag.path, "/players/route1");
+  EXPECT_EQ(tag.regex, "player[0-9]+");
+  EXPECT_EQ(tag.corner, cube_corner_bottom_front_left);
+}
+
+TEST(CubeTagTest, ParsePartialFields) {
+  CubeTag tag = CubeTagParser::parse("｟cube:path=/route/to/ai｠");
+  EXPECT_TRUE(tag.valid());
+  EXPECT_EQ(tag.contact, "");
+  EXPECT_EQ(tag.path, "/route/to/ai");
+  EXPECT_EQ(tag.regex, "");
+}
+
+TEST(CubeTagTest, ParseBareTag) {
+  CubeTag tag = CubeTagParser::parse("｟cube｠");
+  EXPECT_FALSE(tag.valid());
+  EXPECT_EQ(tag.contact, "");
+  EXPECT_EQ(tag.path, "");
+  EXPECT_EQ(tag.regex, "");
+}
+
+TEST(CubeTagTest, ParseInvalidReturnsEmpty) {
+  CubeTag tag = CubeTagParser::parse("not a placeholder");
+  EXPECT_FALSE(tag.valid());
+  CubeTag tag2 = CubeTagParser::parse("｟other:contact=x｠");
+  EXPECT_FALSE(tag2.valid());
+}
+
+TEST(CubeTagTest, EncodeRoundTrip) {
+  CubeTag tag;
+  tag.contact = "bob@helmet.ai";
+  tag.path    = "/ai/hub/player42";
+  tag.regex   = "^player\\d+$";
+
+  const std::string encoded = CubeTagParser::encode(tag);
+  EXPECT_TRUE(CubeTagParser::is_cube_tag(encoded));
+
+  CubeTag parsed = CubeTagParser::parse(encoded);
+  EXPECT_EQ(parsed, tag);
+}
+
+TEST(CubeTagTest, EncodeOmitsDefaultCorner) {
+  CubeTag tag;
+  tag.contact = "x";
+  const std::string encoded = CubeTagParser::encode(tag);
+  EXPECT_EQ(encoded.find("corner="), std::string::npos);
+}
+
+TEST(CubeTagTest, EncodeNonDefaultCorner) {
+  CubeTag tag;
+  tag.contact = "x";
+  tag.corner  = "top-back-right";
+  const std::string encoded = CubeTagParser::encode(tag);
+  EXPECT_NE(encoded.find("corner=top-back-right"), std::string::npos);
+}
+
+TEST(CubeTagTest, FindCornerTagsSingle) {
+  CubeTag tag;
+  tag.contact = "p1@ai.net";
+  tag.path    = "/route/p1";
+  const std::string text = CubeTagParser::encode(tag) + " Hello player one";
+
+  auto corner_tags = CubeTagParser::find_corner_tags(text);
+  ASSERT_EQ(corner_tags.size(), 1u);
+  EXPECT_EQ(corner_tags[0].contact, "p1@ai.net");
+  EXPECT_EQ(corner_tags[0].path, "/route/p1");
+}
+
+TEST(CubeTagTest, FindCornerTagsMultiple) {
+  CubeTag tag1;
+  tag1.contact = "p1";
+  CubeTag tag2;
+  tag2.path = "/route/p2";
+  const std::string text = CubeTagParser::encode(tag1) + " " + CubeTagParser::encode(tag2) + " some text";
+
+  auto corner_tags = CubeTagParser::find_corner_tags(text);
+  ASSERT_EQ(corner_tags.size(), 2u);
+  EXPECT_EQ(corner_tags[0].contact, "p1");
+  EXPECT_EQ(corner_tags[1].path, "/route/p2");
+}
+
+TEST(CubeTagTest, FindCornerTagsNoneAtStart) {
+  CubeTag tag;
+  tag.contact = "p1";
+  const std::string text = "Some text " + CubeTagParser::encode(tag);
+
+  auto corner_tags = CubeTagParser::find_corner_tags(text);
+  EXPECT_TRUE(corner_tags.empty());
+}
+
+TEST(CubeTagTest, FindCornerTagsEmptyText) {
+  auto corner_tags = CubeTagParser::find_corner_tags("");
+  EXPECT_TRUE(corner_tags.empty());
+}
+
+TEST(CubeTagTest, TokenizerTreatesCubeTagAsPlaceholder) {
+  Tokenizer::Options options;
+  options.mode = Tokenizer::Mode::Conservative;
+  Tokenizer tokenizer(options);
+
+  CubeTag tag;
+  tag.contact = "player1@ai.net";
+  tag.path    = "/route/a";
+  const std::string cube_placeholder = CubeTagParser::encode(tag);
+  const std::string text = cube_placeholder + " Hello world";
+
+  std::vector<std::string> tokens;
+  tokenizer.tokenize(text, tokens);
+
+  ASSERT_FALSE(tokens.empty());
+  EXPECT_EQ(tokens[0], cube_placeholder);
 }

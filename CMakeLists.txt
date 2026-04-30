@@ -75,6 +75,7 @@ set(PUBLIC_HEADERS
   include/onmt/Token.h
   include/onmt/BPE.h
   include/onmt/BPELearner.h
+  include/onmt/CubeTag.h
   include/onmt/ITokenizer.h
   include/onmt/SPMLearner.h
   include/onmt/SentencePiece.h
@@ -89,6 +90,7 @@ set(SOURCES
   src/BPE.cc
   src/BPELearner.cc
   src/Casing.cc
+  src/CubeTag.cc
   src/ITokenizer.cc
   src/SentencePiece.cc
   src/SentencePieceLearner.cc
